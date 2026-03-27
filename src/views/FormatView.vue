@@ -24,13 +24,21 @@
       <section class="json-tools-split-col json-tools-panel--flat" :style="{ flex: `0 0 ${formatLeftWidthPx}px` }">
         <div class="json-tools-panel-body">
           <div class="json-tools-panel-title">{{ t('common.inputJson') }}</div>
-          <el-input
-            v-model="formatInput"
-            class="json-tools-textarea-full"
-            type="textarea"
-            :autosize="false"
-            placeholder='例如：{"a":1,"b":{"c":2}} 或 "{\"a\":1}'
-          />
+          <div class="json-editor">
+            <div class="json-editor-gutter" ref="gutterRef">
+              <div v-for="line in editorLineCount" :key="line" class="json-editor-line-number">{{ line }}</div>
+            </div>
+            <div
+              ref="editorRef"
+              class="json-editor-input"
+              contenteditable="true"
+              spellcheck="false"
+              @input="onEditorInput"
+              @keydown="onEditorKeydown"
+              @paste="onEditorPaste"
+              @scroll="syncEditorScroll"
+            />
+          </div>
         </div>
       </section>
 
@@ -91,6 +99,9 @@ const formatIndent = ref(2)
 const formatOutputTab = ref('pretty')
 const parsedJson = ref(null)
 const formatTreeData = ref([])
+const editorRef = ref(null)
+const gutterRef = ref(null)
+let isSyncingEditor = false
 
 const formatResizeWrapRef = ref(null)
 const formatLeftWidthPx = ref(520)
@@ -117,6 +128,47 @@ function clampFormatLeftWidth() {
   const minRight = 420
   const maxLeft = Math.max(minLeft, rect.width - minRight)
   formatLeftWidthPx.value = Math.min(maxLeft, Math.max(minLeft, formatLeftWidthPx.value))
+}
+
+function normalizeEditorText(s) {
+  return String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+}
+
+function setEditorText(text) {
+  const el = editorRef.value
+  if (!el) return
+  const normalized = normalizeEditorText(text)
+  if (normalizeEditorText(el.innerText) === normalized) return
+  isSyncingEditor = true
+  el.innerText = normalized
+  isSyncingEditor = false
+}
+
+function onEditorInput() {
+  if (isSyncingEditor) return
+  const el = editorRef.value
+  if (!el) return
+  formatInput.value = normalizeEditorText(el.innerText)
+}
+
+function onEditorKeydown(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault()
+    document.execCommand('insertText', false, '  ')
+  }
+}
+
+function onEditorPaste(e) {
+  e.preventDefault()
+  const text = e.clipboardData?.getData('text/plain') || ''
+  document.execCommand('insertText', false, text)
+}
+
+function syncEditorScroll() {
+  const editor = editorRef.value
+  const gutter = gutterRef.value
+  if (!editor || !gutter) return
+  gutter.scrollTop = editor.scrollTop
 }
 
 function startFormatResize(e) {
@@ -159,6 +211,7 @@ function startFormatResize(e) {
 onMounted(() => {
   clampFormatLeftWidth()
   window.addEventListener('resize', clampFormatLeftWidth)
+  setEditorText(formatInput.value)
 })
 
 onBeforeUnmount(() => {
@@ -213,10 +266,23 @@ watch(
   { immediate: true }
 )
 
+watch(
+  () => formatInput.value,
+  (v) => {
+    setEditorText(v)
+  }
+)
+
 const canCopyFormat = computed(() => {
   if (formatOutputTab.value === 'pretty') return !!formatOutputText.value
   if (formatOutputTab.value === 'minify') return !!minifyOutputText.value
   return formatTreeData.value.length > 0
+})
+
+const editorLineCount = computed(() => {
+  const raw = normalizeEditorText(formatInput.value)
+  if (!raw) return 1
+  return raw.split('\n').length
 })
 
 function resetFormat() {
@@ -260,16 +326,13 @@ async function copyCurrentOutput() {
 .json-tools-format {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 64px - 16px);
+  min-height: calc(100vh - 120px);
 }
 
-.json-tools-alert {
-  margin-bottom: 12px;
-}
+
 
 .json-tools-format-toolbar-top {
   position: sticky;
-  top: 64px;
   z-index: 6;
   padding: 10px 0 8px;
   background: var(--el-fill-color-blank);
@@ -325,12 +388,9 @@ async function copyCurrentOutput() {
   flex-wrap: wrap;
   align-items: center;
   gap: 12px 16px;
-  margin-bottom: 8px;
 }
 
-.json-tools-toolbar-actions {
-  margin-top: 4px;
-}
+
 
 .json-tools-toolbar-label {
   font-size: 13px;
@@ -358,7 +418,6 @@ async function copyCurrentOutput() {
   font-size: 13px;
   font-weight: 600;
   color: var(--el-text-color-primary);
-  margin-bottom: 8px;
 }
 
 .json-tools-textarea-full {
@@ -366,20 +425,52 @@ async function copyCurrentOutput() {
   min-height: 0;
 }
 
-.json-tools-textarea-full :deep(.el-textarea) {
-  height: 100%;
+.json-editor {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  flex-direction: column;
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  background: var(--el-fill-color-blank);
+  overflow: hidden;
 }
 
-.json-tools-textarea-full :deep(.el-textarea__inner) {
+.json-editor-gutter {
+  width: 52px;
+  flex: 0 0 52px;
+  padding: 8px 6px;
+  border-right: 1px solid var(--el-border-color-lighter);
+  color: var(--el-text-color-secondary);
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: hidden;
+  user-select: none;
+}
+
+.json-editor-line-number {
+  height: 1.5em;
+}
+
+.json-editor-input {
   flex: 1;
   min-height: 200px;
-  height: 100% !important;
-  resize: none;
+  height: 100%;
+  overflow: auto;
+  padding: 8px 10px;
+  outline: none;
+  white-space: pre;
+  word-break: normal;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.json-editor-input:empty::before {
+  content: '例如：{"a":1,"b":{"c":2}} 或 "{\\"a\\":1}"';
+  color: var(--el-text-color-placeholder);
+  pointer-events: none;
 }
 
 .json-output-tabs {

@@ -108,12 +108,8 @@ function handleMenuSelect(index) {
 
 .json-tools-page {
   padding: 0;
-  min-height: 100vh;
 }
 
 .json-tools-main {
-  padding: 16px;
-  box-sizing: border-box;
-  min-height: calc(100vh - 64px);
 }
 </style>
